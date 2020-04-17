@@ -44,7 +44,7 @@ class Image:
         """
         Rotate clockwise by 90 degrees.
         """
-        return Image(np.rot90(self.matrix, axes=(1, 0)))
+        return [Image(np.rot90(self.matrix, axes=(1, 0)))]
 
     def mirror(self):
         """
@@ -53,21 +53,27 @@ class Image:
         [ 0.,  2.,  0.],   --->   [ 0.,  2.,  0.]
         [ 0.,  0.,  3.]]          [ 3.,  0.,  0.]
         """
-        return Image(np.fliplr(self.matrix))
+        return [Image(np.fliplr(self.matrix))]
 
     #def repeat_2(self):
         #return Image(self.matrix.repeat(2, axis=0).repeat(2, axis=1))
 
     def repeat_3(self):
-        return Image(self.matrix.repeat(3, axis=0).repeat(3, axis=1))
+        """
+        Copy and repeat the array in a 3x3 square area
+                            [[ 1., 1., 1.],
+         [[ 1.]]    --->     [ 1., 1., 1.],
+                             [ 1., 1., 1.]]
+        """
+        return [Image(self.matrix.repeat(3, axis=0).repeat(3, axis=1))]
 
     # @withrepr(lambda x: x.__name__)
     def concat_right(self, image):
         """
         A,B -> AB
         """
-        if self.height != image.height: return None
-        return Image(np.concatenate((self.matrix, image.matrix), axis=1))
+        if self.height != image.height: return []
+        return [Image(np.concatenate((self.matrix, image.matrix), axis=1))]
 
     # @withrepr(lambda x: x.__name__)
     def concat_down(self, image):
@@ -75,8 +81,8 @@ class Image:
         A,B -> A
                B
         """
-        if self.width != image.width: return None
-        return Image(np.concatenate((self.matrix, image.matrix)))
+        if self.width != image.width: return []
+        return [Image(np.concatenate((self.matrix, image.matrix)))]
 
     def logical_and(self, image):
         """
@@ -85,14 +91,20 @@ class Image:
         w, h = self.width, self.height
         i_w, i_h = image.width, image.height
 
-        if w > i_w and h > i_h: # try to adjust the image size
+        w, h = self.width, self.height
+        i_w, i_h = image.width, image.height
+
+        if w > i_w or h > i_h:  # try to adjust the image size
             ratio_w = w / float(i_w)
             ratio_h = h / float(i_h)
-            if ratio_w.is_integer() and ratio_w == ratio_h:
-                image.matrix = np.tile(image.matrix, (int(ratio_w), int(ratio_w)))
+            if ratio_w.is_integer() and ratio_h.is_integer():
+                image.matrix = np.tile(image.matrix, (int(ratio_h), int(ratio_w)))
+            else:
+                return []
         elif w != i_w or h != i_h:
-            return None
-        return Image(self.matrix & image.matrix)
+            return []
+
+        return [Image(self.matrix & image.matrix)]
 
     def __eq__(self, other):
         if isinstance(other, Image):
@@ -162,17 +174,25 @@ def recursionTree(depth):
 
 def compute(exprTree, inpImage):
     if not exprTree:
-        return None
+        return []
     key = next(iter(exprTree.keys()))
     if key == 'image':
-        return inpImage
+        return [inpImage]
     elif key in Image.binary_tfs():
-        l = compute(exprTree[key]['l'], inpImage)
-        r = compute(exprTree[key]['r'], inpImage)
-        return Image.binary_tfs()[key](l, r) if l and r else None
+        l_list = compute(exprTree[key]['l'], inpImage)
+        r_list = compute(exprTree[key]['r'], inpImage)
+        res = []
+        if not l_list or not r_list: return res
+        for l in l_list:
+            for r in r_list:
+                res+=Image.binary_tfs()[key](l, r)
+        return res
     elif key in Image.unary_tfs():
-        l = compute(next(iter(exprTree.values())), inpImage)
-        return Image.unary_tfs()[key](l) if l else None
+        l_list = compute(next(iter(exprTree.values())), inpImage)
+        res = []
+        for l in l_list:
+            res+=Image.unary_tfs()[key](l)
+        return res
 
 
 data_path = Path('data/')
@@ -195,8 +215,8 @@ def find_tree(path, depth, verbose=False):
             passed = True
             for pair in train_data:
                 inp, out = Image(pair['input']), Image(pair['output'])
-                pred = compute(imgTree, inp)
-                if pred != out:
+                preds = compute(imgTree, inp)
+                if out not in preds:
                     passed = False
                     break
             if passed:
