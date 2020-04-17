@@ -1,3 +1,6 @@
+import collections
+from types import FunctionType
+
 import numpy as np
 import itertools
 from collections import defaultdict
@@ -15,10 +18,25 @@ def tree(): return defaultdict(tree)
 def dicts(t): return {k: dicts(t[k]) for k in t}
 
 class Image:
+    @classmethod
+    def transforms(cls):
+        return ({name : f for name, f in cls.__dict__.items()
+                   if type(f) == FunctionType and not name.startswith('__')})
+
+    @classmethod
+    def unary_tfs(cls):
+        return ({name : tf for name, tf in cls.transforms().items()
+                    if len(tf.__code__.co_varnames)==1})
+
+    @classmethod
+    def binary_tfs(cls):
+        return ({name: tf for name, tf in cls.transforms().items()
+                 if len(tf.__code__.co_varnames)==2})
 
     def __init__(self, matrix):
         self.matrix = np.matrix(matrix)
         self.height, self.width = self.matrix.shape
+
 
     # @withrepr(lambda x: "<Func: %s>" % x.__name__)
     def rotate_90(self):
@@ -41,10 +59,8 @@ class Image:
         """
         A,B -> AB
         """
+        if self.height != image.height: return None
         return Image(np.concatenate((self.matrix, image.matrix), axis=1))
-
-    def concat_right_compat(self, image):
-        return self.height == image.height
 
     # @withrepr(lambda x: x.__name__)
     def concat_down(self, image):
@@ -52,10 +68,8 @@ class Image:
         A,B -> A
                B
         """
+        if self.width != image.width: return None
         return Image(np.concatenate((self.matrix, image.matrix)))
-
-    def concat_down_compat(self, image):
-        return self.width == image.width
 
     def __eq__(self, other):
         if isinstance(other, Image):
@@ -68,27 +82,16 @@ class Image:
     def __repr__(self):
         return str(self.matrix)
 
-# methods_list = [func for func in dir(Image) if callable(getattr(Image, func)) and not func.startswith("__")]
-# print(methods_list)
-# for method in methods_list:
-# 	exec(f"{method} = Image.{method}")
-
-rotate_90 = Image.rotate_90
-mirror = Image.mirror
-concat_right = Image.concat_right
-concat_right_compat = Image.concat_right_compat
-concat_down = Image.concat_down
-concat_down_compat = Image.concat_down_compat
 
 
 def partitionfunc(n, k, l=1):
     """n is the integer to partition, k is the length of partitions, l is the min partition element size"""
     if k < 1:
-        raise StopIteration
+        return
     if k == 1:
         if n >= l:
             yield (n,)
-        raise StopIteration
+        return
     for i in range(l, n + 1):
         for result in partitionfunc(n - i, k - 1, i):
             yield (i,) + result
@@ -98,122 +101,66 @@ def permutatations(partitions):
     return [*itertools.chain.from_iterable(set(itertools.permutations(p)) for p in partitions)]
 
 
-def recursion(depth, image):
-    expressions = {1: [image]}
-    for i in range(2, depth + 1):
-        # single argument
-        rotate_90_expressions = [rotate_90(img) for img in expressions[i - 1]]
-        # two arguments
-        partitions = list(partitionfunc(i - 1, 2))
-        perms = permutatations(partitions)
-        concat_right_expressions = []
-        concat_down_expressions = []
-        for a, b in perms:
-            concat_right_expressions += [concat_right(img1, img2) for img1 in expressions[a]
-                                             for img2 in expressions[b]
-                                             if concat_right_compat(img1, img2)]
-            concat_down_expressions += [concat_down(img1, img2) for img1 in expressions[a]
-                                            for img2 in expressions[b]
-                                            if concat_down_compat(img1, img2)]
-        # append
-        expressions[i] = (rotate_90_expressions + concat_right_expressions + concat_down_expressions)
-    return expressions
-
-
-def create_random_string(k=10):
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=k))
-
-
 def recursionTree(depth):
     input_tree = tree()
     input_tree['image']
-    expressions = {1: [input_tree]}
+    expressions = collections.defaultdict(list)
+    expressions[1] = [input_tree]
     for i in range(2, depth + 1):
         # single argument
-        rotate_90_expressions = []
-        mirror_expressions = []
+        unary_expressions = collections.defaultdict(list)
         for img_tree in expressions[i - 1]:
-            # create tree
-            rotate_90_tree = tree()
-            rotate_90_tree['rotate_90'] = img_tree
-            mirror_tree = tree()
-            mirror_tree['mirror'] = img_tree
-            # append
-            rotate_90_expressions.append(rotate_90_tree)
-            mirror_expressions.append(mirror_tree)
+            for tf_name in Image.unary_tfs().keys():
+                # create tree
+                tf_tree = tree()
+                tf_tree[tf_name] = img_tree
+                # append
+                unary_expressions[tf_name].append(tf_tree)
         # two arguments
         partitions = list(partitionfunc(i - 1, 2))
         perms = permutatations(partitions)
-        concat_right_expressions = []
-        concat_down_expressions = []
+        binary_expressions = collections.defaultdict(list)
         for a, b in perms:
             for img1_tree in expressions[a]:
                 for img2_tree in expressions[b]:
-                    # if concat_right_compat(img1, img2):
-                    if True:
+                    for tf_name in Image.binary_tfs().keys():
                         # create tree
-                        concat_right_tree = tree()
-                        concat_right_tree['concat_right']['l'] = img1_tree
-                        concat_right_tree['concat_right']['r'] = img2_tree
+                        tf_tree = tree()
+                        tf_tree[tf_name]['l'] = img1_tree
+                        tf_tree[tf_name]['r'] = img2_tree
                         # append
-                        concat_right_expressions.append(concat_right_tree)
-                    # if concat_down_compat(img1, img2):
-                    if True:
-                        # create tree
-                        concat_down_tree = tree()
-                        concat_down_tree['concat_down']['l'] = img1_tree
-                        concat_down_tree['concat_down']['r'] = img2_tree
-                        # append
-                        concat_down_expressions.append(concat_down_tree)
+                        binary_expressions[tf_name].append(tf_tree)
         # append
-        expressions[i] = rotate_90_expressions + mirror_expressions + concat_right_expressions + concat_down_expressions
+        for u_expr in unary_expressions.values(): expressions[i] += u_expr
+        for b_expr in binary_expressions.values(): expressions[i] += b_expr
+
     return expressions
 
 
 def compute(exprTree, inpImage):
-    if exprTree is None:
+    if not exprTree:
         return None
     key = next(iter(exprTree.keys()))
     if key == 'image':
         return inpImage
-    elif key == 'rotate_90':
+    elif key in Image.binary_tfs():
+        l = compute(exprTree[key]['l'], inpImage)
+        r = compute(exprTree[key]['r'], inpImage)
+        return Image.binary_tfs()[key](l, r) if l and r else None
+    elif key in Image.unary_tfs():
         l = compute(next(iter(exprTree.values())), inpImage)
-        if l is None:
-            return None
-        return rotate_90(l)
-    elif key == 'mirror':
-        l = compute(next(iter(exprTree.values())), inpImage)
-        if l is None:
-            return None
-        return mirror(l)
-    elif key == 'concat_right':
-        l = compute(exprTree['concat_right']['l'], inpImage)
-        r = compute(exprTree['concat_right']['r'], inpImage)
-        if l is None or r is None:
-            return None
-        if concat_right_compat(l, r):
-            return concat_right(l, r)
-        return None
-    elif key == 'concat_down':
-        l = compute(exprTree['concat_down']['l'], inpImage)
-        r = compute(exprTree['concat_down']['r'], inpImage)
-        if l is None or r is None:
-            return None
-        if concat_down_compat(l, r):
-            return concat_down(l, r)
-        return None
+        return Image.unary_tfs()[key](l) if l else None
+
 
 data_path = Path('data/')
 training_path = data_path / 'training'
 evaluation_path = data_path / 'evaluation'
 test_path = data_path / 'test'
 
-
 def get_data(task_filename):
     with open(task_filename, 'r') as f:
         task = json.load(f)
     return task
-
 
 def find_tree(path, depth, verbose=False):
     data = get_data(path)
@@ -225,14 +172,16 @@ def find_tree(path, depth, verbose=False):
             passed = True
             for pair in train_data:
                 inp, out = Image(pair['input']), Image(pair['output'])
-                if compute(imgTree, inp) != out:
+                pred = compute(imgTree, inp)
+                if pred != out:
                     passed = False
                     break
             if passed:
+                solutions.append(imgTree)
                 if verbose:
                     print('Bingo!')
                     pp.pprint(dicts(imgTree))
-                solutions.append(imgTree)
+
     return solutions
 
 
@@ -245,12 +194,4 @@ def solve_all_tasks(depth, training):
         if task_solutions:
             all_solutions[task] = task_solutions
     return all_solutions
-
-
-all_solutions = solve_all_tasks(5, 'training')
-# print(list(all_solutions.keys()))
-for key, value in all_solutions.items():
-    print(key)
-    print(value[0])
-    print()
 
