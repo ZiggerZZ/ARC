@@ -12,32 +12,35 @@ import os
 # from utils import withrepr
 
 import pprint
+
 pp = pprint.PrettyPrinter(indent=0)
+
 
 def tree(): return defaultdict(tree)
 
+
 def dicts(t): return {k: dicts(t[k]) for k in t}
+
 
 class Image:
     @classmethod
     def transforms(cls):
-        return ({name : f for name, f in cls.__dict__.items()
-                   if type(f) == FunctionType and not name.startswith('__')})
+        return ({name: f for name, f in cls.__dict__.items()
+                 if type(f) == FunctionType and not name.startswith('__')})
 
     @classmethod
     def unary_tfs(cls):
-        return ({name : tf for name, tf in cls.transforms().items()
-                    if len(signature(tf).parameters)==1})
+        return ({name: tf for name, tf in cls.transforms().items()
+                 if len(signature(tf).parameters) == 1})
 
     @classmethod
     def binary_tfs(cls):
         return ({name: tf for name, tf in cls.transforms().items()
-                 if len(signature(tf).parameters)==2})
+                 if len(signature(tf).parameters) == 2})
 
     def __init__(self, matrix):
         self.matrix = np.matrix(matrix)
         self.height, self.width = self.matrix.shape
-
 
     # @withrepr(lambda x: "<Func: %s>" % x.__name__)
     def rotate_90(self):
@@ -55,8 +58,8 @@ class Image:
         """
         return [Image(np.fliplr(self.matrix))]
 
-    #def repeat_2(self):
-        #return Image(self.matrix.repeat(2, axis=0).repeat(2, axis=1))
+    # def repeat_2(self):
+    # return Image(self.matrix.repeat(2, axis=0).repeat(2, axis=1))
 
     def repeat_3(self):
         """
@@ -106,9 +109,52 @@ class Image:
 
         return [Image(self.matrix & image.matrix)]
 
+
+    def get_objects(self):
+        """
+        Returns a list of minimal rectangles for all objects in the image.
+        Object is a connected component of more than one cell with pixels of the same color except black.
+        Looks at vertical, horizontal and diagonal connections.
+        """
+        matrix = self.matrix
+        assert len(matrix.shape) == 2
+        h, w = matrix.shape
+        dyy = [0, -1, -1, -1, 0, 1, 1, 1]
+        dxx = [1, 1, 0, -1, -1, -1, 0, 1]
+        visited = np.zeros(matrix.shape, dtype=bool)
+        shapes = []
+        based_geometry = {'l': w, 'r': 0, 'b': h, 't': 0}
+        for i in range(h):
+            for j in range(w):
+                color = matrix[i,j]
+                if color == 0:
+                    continue
+                stack = [(i, j)]
+                geometry = dict(based_geometry)
+                while stack:
+                    y, x = stack.pop(0)
+                    if not (0 <= y < h and 0 <= x < w and matrix[y,x] == color):
+                        continue
+                    if not visited[y][x]:
+                        geometry['l'] = min(geometry['l'], x)
+                        geometry['r'] = max(geometry['r'], x)
+                        geometry['b'] = min(geometry['b'], y)
+                        geometry['t'] = max(geometry['t'], y)
+                        visited[y][x] = True
+                        for dy, dx in zip(dyy, dxx):
+                            y_, x_ = y + dy, x + dx
+                            stack.append((y_, x_))
+                shared_items = {k: geometry[k] for k in geometry if
+                                k in based_geometry and geometry[k] == based_geometry[k]}
+                if len(shared_items) < 4:
+                    crop_matrix = matrix[geometry['b']:geometry['t'] + 1, geometry['l']:geometry['r'] + 1]
+                    if crop_matrix.size > 1 and crop_matrix.size != matrix.size:
+                        shapes.append(Image(crop_matrix))
+        return shapes
+
     def __eq__(self, other):
         if isinstance(other, Image):
-            return np.array_equal(self.matrix,other.matrix)
+            return np.array_equal(self.matrix, other.matrix)
         return False
 
     def __str__(self):
@@ -116,7 +162,6 @@ class Image:
 
     def __repr__(self):
         return str(self.matrix)
-
 
 
 def partitionfunc(n, k, l=1):
@@ -185,13 +230,13 @@ def compute(exprTree, inpImage):
         if not l_list or not r_list: return res
         for l in l_list:
             for r in r_list:
-                res+=Image.binary_tfs()[key](l, r)
+                res += Image.binary_tfs()[key](l, r)
         return res
     elif key in Image.unary_tfs():
         l_list = compute(next(iter(exprTree.values())), inpImage)
         res = []
         for l in l_list:
-            res+=Image.unary_tfs()[key](l)
+            res += Image.unary_tfs()[key](l)
         return res
 
 
@@ -200,10 +245,12 @@ training_path = data_path / 'training'
 evaluation_path = data_path / 'evaluation'
 test_path = data_path / 'test'
 
+
 def get_data(task_filename):
     with open(task_filename, 'r') as f:
         task = json.load(f)
     return task
+
 
 def find_tree(path, depth, verbose=False):
     data = get_data(path)
