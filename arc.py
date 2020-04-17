@@ -1,4 +1,5 @@
 import collections
+from inspect import signature
 from types import FunctionType
 
 import numpy as np
@@ -26,12 +27,12 @@ class Image:
     @classmethod
     def unary_tfs(cls):
         return ({name : tf for name, tf in cls.transforms().items()
-                    if len(tf.__code__.co_varnames)==1})
+                    if len(signature(tf).parameters)==1})
 
     @classmethod
     def binary_tfs(cls):
         return ({name: tf for name, tf in cls.transforms().items()
-                 if len(tf.__code__.co_varnames)==2})
+                 if len(signature(tf).parameters)==2})
 
     def __init__(self, matrix):
         self.matrix = np.matrix(matrix)
@@ -54,6 +55,24 @@ class Image:
         """
         return Image(np.fliplr(self.matrix))
 
+    def repeat_2(self):
+        """
+        Mirror flip from left to right
+        [[ 1.,  2.,  3.],         [ 3.,  2.,  1.]
+        [ 0.,  2.,  0.],   --->   [ 0.,  2.,  0.]
+        [ 0.,  0.,  3.]]          [ 3.,  0.,  0.]
+        """
+        return Image(self.matrix.repeat(2, axis=0).repeat(2, axis=1))
+
+    def repeat_3(self):
+        """
+        Mirror flip from left to right
+        [[ 1.,  2.,  3.],         [ 3.,  2.,  1.]
+        [ 0.,  2.,  0.],   --->   [ 0.,  2.,  0.]
+        [ 0.,  0.,  3.]]          [ 3.,  0.,  0.]
+        """
+        return Image(self.matrix.repeat(3, axis=0).repeat(3, axis=1))
+
     # @withrepr(lambda x: x.__name__)
     def concat_right(self, image):
         """
@@ -70,6 +89,22 @@ class Image:
         """
         if self.width != image.width: return None
         return Image(np.concatenate((self.matrix, image.matrix)))
+
+    def logical_and(self, image):
+        """
+        A & B
+        """
+        w, h = self.width, self.height
+        i_w, i_h = image.width, image.height
+
+        if w > i_w and h > i_h: # try to adjust the image size
+            ratio_w = w / i_w
+            ratio_h = h / i_h
+            if ratio_w.is_integer() and ratio_w == ratio_h:
+                image.matrix = np.tile(image.matrix, (int(ratio_w), int(ratio_w)))
+        elif w != i_w or h != i_h:
+            return None
+        return Image(self.matrix & image.matrix)
 
     def __eq__(self, other):
         if isinstance(other, Image):
@@ -194,4 +229,3 @@ def solve_all_tasks(depth, training):
         if task_solutions:
             all_solutions[task] = task_solutions
     return all_solutions
-
