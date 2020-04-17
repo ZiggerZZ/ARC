@@ -55,22 +55,10 @@ class Image:
         """
         return Image(np.fliplr(self.matrix))
 
-    def repeat_2(self):
-        """
-        Mirror flip from left to right
-        [[ 1.,  2.,  3.],         [ 3.,  2.,  1.]
-        [ 0.,  2.,  0.],   --->   [ 0.,  2.,  0.]
-        [ 0.,  0.,  3.]]          [ 3.,  0.,  0.]
-        """
-        return Image(self.matrix.repeat(2, axis=0).repeat(2, axis=1))
+    #def repeat_2(self):
+        #return Image(self.matrix.repeat(2, axis=0).repeat(2, axis=1))
 
     def repeat_3(self):
-        """
-        Mirror flip from left to right
-        [[ 1.,  2.,  3.],         [ 3.,  2.,  1.]
-        [ 0.,  2.,  0.],   --->   [ 0.,  2.,  0.]
-        [ 0.,  0.,  3.]]          [ 3.,  0.,  0.]
-        """
         return Image(self.matrix.repeat(3, axis=0).repeat(3, axis=1))
 
     # @withrepr(lambda x: x.__name__)
@@ -98,8 +86,8 @@ class Image:
         i_w, i_h = image.width, image.height
 
         if w > i_w and h > i_h: # try to adjust the image size
-            ratio_w = w / i_w
-            ratio_h = h / i_h
+            ratio_w = w / float(i_w)
+            ratio_h = h / float(i_h)
             if ratio_w.is_integer() and ratio_w == ratio_h:
                 image.matrix = np.tile(image.matrix, (int(ratio_w), int(ratio_w)))
         elif w != i_w or h != i_h:
