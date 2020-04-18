@@ -15,7 +15,7 @@ import pprint
 pp = pprint.PrettyPrinter(indent=0)
 
 
-def tree(): return defaultdict(tree)
+def Tree(): return defaultdict(Tree)
 
 
 def dicts(t):
@@ -238,7 +238,7 @@ sorted_unary = sorted(Image.unary_tfs())
 
 
 def recursionTree(length):
-    input_tree = tree()
+    input_tree = Tree()
     input_tree['image']
     expressions = defaultdict(list)
     expressions[1] = [input_tree]
@@ -258,22 +258,22 @@ def recursionTree(length):
                     if tf_name == 'crop':
                         tf_tree = None
                         if prev_tf_name != 'crop':
-                            tf_tree = tree()
+                            tf_tree = Tree()
                             tf_tree[tf_name] = img_tree
                     # check if previous transformation is not mirror because mirror^2(I) = I
                     elif tf_name == 'mirror':
                         tf_tree = None
                         if prev_tf_name != 'mirror':
-                            tf_tree = tree()
+                            tf_tree = Tree()
                             tf_tree[tf_name] = img_tree
                     elif tf_name == 'get_object':
                         tf_tree = None
                         if prev_tf_name != 'get_object':
-                            tf_tree = tree()
+                            tf_tree = Tree()
                             tf_tree[tf_name] = img_tree
                     else:
                         # create tree
-                        tf_tree = tree()
+                        tf_tree = Tree()
                         tf_tree[tf_name] = img_tree
                     # append
                     # unary_expressions[tf_name] += [tf_tree] if tf_tree else []
@@ -292,12 +292,12 @@ def recursionTree(length):
                             tf_tree = None
                             if not (get_key(img1_tree) == 'mirror' and
                                     get_key(img2_tree) == 'mirror'):
-                                tf_tree = tree()
+                                tf_tree = Tree()
                                 tf_tree[tf_name]['l'] = img1_tree
                                 tf_tree[tf_name]['r'] = img2_tree
                         else:
                             # create tree
-                            tf_tree = tree()
+                            tf_tree = Tree()
                             tf_tree[tf_name]['l'] = img1_tree
                             tf_tree[tf_name]['r'] = img2_tree
                         # append
