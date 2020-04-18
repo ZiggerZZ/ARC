@@ -573,29 +573,32 @@ def solve_task(path, length, verbose=False):
     expressions, list_of_sets_of_all_possible_images = \
         recursionTreeEvalSet(length,[{Image(pair['input'])} for pair in train_data])
 
-    passed = True
-    for i, pair in enumerate(train_data):
-        if Image(pair['output']) not in list_of_sets_of_all_possible_images[i]:
-            passed = False
-            break
-    if passed and verbose:
-        print('Bingo!', path)
+    # Run this if just want to know if solved or not
+    # passed = True
+    # for i, pair in enumerate(train_data):
+    #     if Image(pair['output']) not in list_of_sets_of_all_possible_images[i]:
+    #         passed = False
+    #         break
+    # if passed and verbose:
+    #     print('Bingo!', path)
 
-    # solutions = []
-    # for i, (expression, lists) in expressions.items():
-    #     for imgTree in v:
-    #         passed = True
-    #         for pair in train_data:
-    #             inp, out = Image(pair['input']), Image(pair['output'])
-    #             if out not in compute(imgTree, inp):
-    #                 passed = False
-    #                 break
-    #         if passed:
-    #             if verbose:
-    #                 print('Bingo!')
-    #                 pp.pprint(dicts(imgTree))
-    #             solutions.append(imgTree)
-    # return solutions
+    solutions = []
+    for length_of_expression, list_of_pairs_expression_list in expressions.items():
+        for expression, list_of_sets in list_of_pairs_expression_list:
+            passed = True
+            for i, pair in enumerate(train_data):
+                if Image(pair['output']) not in list_of_sets[i]:
+                    passed = False
+                    break
+            if passed and verbose:
+                print('Bingo! Length', length_of_expression, path)
+                pp.pprint(dicts(expression))
+            if passed:
+                if verbose:
+                    print('Bingo!')
+                    pp.pprint(dicts(expression))
+                solutions.append(expression)
+    return solutions
 
 
 def get_key(t):
