@@ -29,6 +29,15 @@ def dicts(t):
 COLORS = range(10)
 OBJECT_INDICES = range(10)
 
+class A:
+    def __init__(self, matrix):
+        self.matrix = matrix
+
+def to_tuple(array):
+    """
+    array - list of lists of 2-dim np.array
+    """
+    return tuple(map(tuple, array))
 
 class Image:
     """
@@ -58,8 +67,12 @@ class Image:
         #          if len(signature(tf).parameters)==2})
 
     def __init__(self, matrix):
-        self.matrix = np.matrix(matrix)
-        self.height, self.width = self.matrix.shape
+        """
+        All fields are immutable so we could hash Image instances.
+        matrix: a list of lists or numpy array
+        """
+        self.matrix = to_tuple(matrix)
+        self.height, self.width = len(self.matrix), len(self.matrix[0])
 
     # @withrepr(lambda x: "<Func: %s>" % x.__name__)
     def rotate_90(self):
@@ -68,7 +81,8 @@ class Image:
         This transformation has propriety rotate_90^4(I)=I.
         This transformation commutes with mirror, crop.
         """
-        return Image(np.rot90(self.matrix, axes=(1, 0)))
+        matrix = np.array(self.matrix)
+        return Image(np.rot90(matrix, axes=(1, 0)))
 
     def mirror(self):
         """
@@ -79,7 +93,8 @@ class Image:
         This transformation has propriety mirror(mirror(I)) = I.
         This transformation commutes with rotate_90, crop.
         """
-        return Image(np.fliplr(self.matrix))
+        matrix = np.array(self.matrix)
+        return Image(np.fliplr(matrix))
 
     # @withrepr(lambda x: x.__name__)
     def concat_right(self, image):
@@ -89,7 +104,9 @@ class Image:
         """
         if self.height != image.height:
             return None
-        return Image(np.concatenate((self.matrix, image.matrix), axis=1))
+        matrix = np.array(self.matrix)
+        image_matrix = np.array(image.matrix)
+        return Image(np.concatenate((matrix, image_matrix), axis=1))
 
     # @withrepr(lambda x: x.__name__)
     def concat_down(self, image):
@@ -100,7 +117,9 @@ class Image:
         """
         if self.width != image.width:
             return None
-        return Image(np.concatenate((self.matrix, image.matrix)))
+        matrix = np.array(self.matrix)
+        image_matrix = np.array(image.matrix)
+        return Image(np.concatenate((matrix, image_matrix)))
 
     def crop(self, color):
         """
@@ -116,44 +135,50 @@ class Image:
         right = -1
         up = 100
         down = -1
+        matrix = np.array(self.matrix)
         for i in range(self.height):
             for j in range(self.width):
-                if self.matrix[i, j] == color:
-                    if j < left: left = j
-                    if j > right: right = j
-                    if i < up: up = i
-                    if i > down: down = i
-        crop_matrix = self.matrix[up:down + 1, left:right + 1]
+                if matrix[i, j] == color:
+                    if j < left:
+                        left = j
+                    if j > right:
+                        right = j
+                    if i < up:
+                        up = i
+                    if i > down:
+                        down = i
+        crop_matrix = matrix[up:down + 1, left:right + 1]
         if crop_matrix.size == 0:
             return None
         return Image(crop_matrix)
 
-    def logical_and(self, image):
-        """
-        A & B
-        color + color = color
-        color + another_color = black
-        """
-        w, h = self.width, self.height
-        i_w, i_h = image.width, image.height
-
-        if w > i_w or h > i_h:  # try to adjust the image size
-            ratio_w = w / float(i_w)
-            ratio_h = h / float(i_h)
-            if ratio_w.is_integer() and ratio_h.is_integer():
-                image.matrix = np.tile(image.matrix, (int(ratio_h), int(ratio_w)))
-            else:
-                return None
-        elif w != i_w or h != i_h:
-            return None
-
-        return Image(self.matrix & image.matrix)
+    # def logical_and(self, image):
+    #     """
+    #     A & B
+    #     color + color = color
+    #     color + another_color = black
+    #     """
+    #     w, h = self.width, self.height
+    #     i_w, i_h = image.width, image.height
+    #
+    #     if w > i_w or h > i_h:  # try to adjust the image size
+    #         ratio_w = w / float(i_w)
+    #         ratio_h = h / float(i_h)
+    #         if ratio_w.is_integer() and ratio_h.is_integer():
+    #             image.matrix = np.tile(image.matrix, (int(ratio_h), int(ratio_w)))
+    #         else:
+    #             return None
+    #     elif w != i_w or h != i_h:
+    #         return None
+    #
+    #     return Image(self.matrix & image.matrix)
 
     def recolor(self, color1, color2):
         """
         changes color1 in the image to color2
         """
-        return Image(np.where(self.matrix == color1, color2, self.matrix))
+        matrix = np.array(self.matrix)
+        return Image(np.where(matrix == color1, color2, matrix))
 
     def get_object(self, index):
         """
@@ -163,7 +188,7 @@ class Image:
         This transformation has property ∀ index1 ∃ index2:
         get_object(get_object(I, index1), index2) = get_object(I, index1).
         """
-        matrix = self.matrix
+        matrix = np.array(self.matrix)
         assert len(matrix.shape) == 2
         h, w = matrix.shape
         dyy = [0, -1, -1, -1, 0, 1, 1, 1]
@@ -180,7 +205,7 @@ class Image:
                 geometry = dict(based_geometry)
                 while stack:
                     y, x = stack.pop(0)
-                    if not (0 <= y < h and 0 <= x < w and matrix[y,x] == color):
+                    if not (0 <= y < h and 0 <= x < w and matrix[y, x] == color):
                         continue
                     if not visited[y][x]:
                         geometry['l'] = min(geometry['l'], x)
@@ -203,7 +228,7 @@ class Image:
 
     def __eq__(self, other):
         if isinstance(other, Image):
-            return np.array_equal(self.matrix, other.matrix)
+            return np.array_equal(np.array(self.matrix), np.array(other.matrix))
         return False
 
     def __str__(self):
@@ -211,6 +236,9 @@ class Image:
 
     def __repr__(self):
         return str(self.matrix)
+
+    def __hash__(self):
+        return hash(self.matrix)
 
 
 def partitionfunc(n, k, l=1):
@@ -309,6 +337,266 @@ def recursionTree(length):
 
     return expressions
 
+def recursionTreeEvalSingle(length, image):
+    input_tree = Tree()
+    input_tree['image']
+    expressions = defaultdict(list)
+    expressions[1] = [(input_tree,[image])]
+    for i in range(2, length + 1):
+        # single argument
+        unary_expressions = defaultdict(list)
+        for img_tree, prev_list_of_imgs in expressions[i - 1]:
+            for tf_name in sorted_unary:
+                prev_tf_name = get_key(img_tree)
+                # if previous transformation is lexicographically smaller, don't apply this, because they commute
+                # i.e. no need to append b(a(...)) because we've already appended a(b(...))
+                # check prev_tf_name >= tf_name for commuting or prev not in commuting (which == sorted_unary here)
+                # get_object does not commute with others but for simplicity we assume that too
+                if prev_tf_name >= tf_name or prev_tf_name not in sorted_unary:
+                    # check if previous transformation is not crop because crop^2(I) = crop(I)
+                    # this is true only for the same color but we suppose that we can't crop^2 anyways
+                    if tf_name == 'crop':
+                        tf_tree = None
+                        if prev_tf_name != 'crop':
+                            list_of_imgs = []
+                            for img in prev_list_of_imgs:
+                                for param in Image.param_tfs()[tf_name]:
+                                    v = Image.unary_tfs()[tf_name](img, param)
+                                    if v:
+                                        list_of_imgs.append(v)
+                            if list_of_imgs:
+                                tf_tree = Tree()
+                                tf_tree[tf_name] = img_tree
+                    # check if previous transformation is not mirror because mirror^2(I) = I
+                    elif tf_name == 'mirror':
+                        tf_tree = None
+                        if prev_tf_name != 'mirror':
+                            list_of_imgs = []
+                            for img in prev_list_of_imgs:
+                                v = Image.unary_tfs()[tf_name](img)
+                                if v:
+                                    list_of_imgs.append(v)
+                            if list_of_imgs:
+                                tf_tree = Tree()
+                                tf_tree[tf_name] = img_tree
+                    # check if previous transformation is not crop because get_object^2(I) = get_object(I)
+                    # this is true only for the same index but we suppose that we can't get_object^2 anyways
+                    elif tf_name == 'get_object':
+                        tf_tree = None
+                        if prev_tf_name != 'get_object':
+                            list_of_imgs = []
+                            for img in prev_list_of_imgs:
+                                for param in Image.param_tfs()[tf_name]:
+                                    v = Image.unary_tfs()[tf_name](img, param)
+                                    if v:
+                                        list_of_imgs.append(v)
+                            # create tree
+                            if list_of_imgs:
+                                tf_tree = Tree()
+                                tf_tree[tf_name] = img_tree
+                    else:
+                        tf_tree = None
+                        list_of_imgs = []
+                        for img in prev_list_of_imgs:
+                            v = Image.unary_tfs()[tf_name](img)
+                            if v:
+                                list_of_imgs.append(v)
+                        # create tree
+                        if list_of_imgs:
+                            tf_tree = Tree()
+                            tf_tree[tf_name] = img_tree
+                    # append
+                    # unary_expressions[tf_name] += [tf_tree] if tf_tree else []
+                    if tf_tree:
+                        unary_expressions[tf_name].append((tf_tree, list_of_imgs))
+        # append
+        for u_expr in unary_expressions.values():
+            expressions[i] += u_expr
+
+    return expressions
+
+def recursionTreeEvalMany(length, images):
+    input_tree = Tree()
+    input_tree['image']
+    expressions = defaultdict(list)
+    expressions[1] = [(input_tree,images)]
+    for i in range(2, length + 1):
+        # single argument
+        unary_expressions = defaultdict(list)
+        for img_tree, prev_list_of_list_of_imgs in expressions[i - 1]:
+            for tf_name in sorted_unary:
+                prev_tf_name = get_key(img_tree)
+                # if previous transformation is lexicographically smaller, don't apply this, because they commute
+                # i.e. no need to append b(a(...)) because we've already appended a(b(...))
+                # check prev_tf_name >= tf_name for commuting or prev not in commuting (which == sorted_unary here)
+                # get_object does not commute with others but for simplicity we assume that too
+                if prev_tf_name >= tf_name or prev_tf_name not in sorted_unary:
+                    # check if previous transformation is not crop or get_object because tf^2(I) = tf(I)
+                    # this is true only for the same param but we suppose that we can't tf^2 anyways
+                    if tf_name in ['crop', 'get_object']:
+                        tf_tree = None
+                        if prev_tf_name != tf_name:
+                            list_of_list_of_imgs = []
+                            for prev_list_of_imgs in prev_list_of_list_of_imgs:
+                                list_of_imgs = []
+                                for img in prev_list_of_imgs:
+                                    for param in Image.param_tfs()[tf_name]:
+                                        v = Image.unary_tfs()[tf_name](img, param)
+                                        if v:
+                                            list_of_imgs.append(v)
+                                list_of_list_of_imgs.append(list_of_imgs)
+                            # check that is every element of list_of_list_of_imgs is not empty
+                            if all(list_of_list_of_imgs):
+                                tf_tree = Tree()
+                                tf_tree[tf_name] = img_tree
+                    # check if previous transformation is not mirror because mirror^2(I) = I
+                    elif tf_name == 'mirror':
+                        tf_tree = None
+                        if prev_tf_name != tf_name:
+                            list_of_list_of_imgs = []
+                            for prev_list_of_imgs in prev_list_of_list_of_imgs:
+                                list_of_imgs = []
+                                for img in prev_list_of_imgs:
+                                    v = Image.unary_tfs()[tf_name](img)
+                                    if v:
+                                        list_of_imgs.append(v)
+                                list_of_list_of_imgs.append(list_of_imgs)
+                            if all(list_of_list_of_imgs):
+                                tf_tree = Tree()
+                                tf_tree[tf_name] = img_tree
+                    else:
+                        tf_tree = None
+                        list_of_list_of_imgs = []
+                        for prev_list_of_imgs in prev_list_of_list_of_imgs:
+                            list_of_imgs = []
+                            for img in prev_list_of_imgs:
+                                v = Image.unary_tfs()[tf_name](img)
+                                if v:
+                                    list_of_imgs.append(v)
+                            list_of_list_of_imgs.append(list_of_imgs)
+                        # create tree
+                        if all(list_of_list_of_imgs):
+                            tf_tree = Tree()
+                            tf_tree[tf_name] = img_tree
+                    # append
+                    # unary_expressions[tf_name] += [tf_tree] if tf_tree else []
+                    if tf_tree:
+                        unary_expressions[tf_name].append((tf_tree, list_of_list_of_imgs))
+        # append
+        for u_expr in unary_expressions.values():
+            expressions[i] += u_expr
+
+    return expressions
+
+
+def recursionTreeEvalSet(length, images):
+    list_of_sets_of_all_possible_images = [set() for _ in range(len(images))]
+    input_tree = Tree()
+    input_tree['image']
+    expressions = defaultdict(list)
+    expressions[1] = [(input_tree,images)]
+    for i in range(2, length + 1):
+        # single argument
+        unary_expressions = defaultdict(list)
+        for img_tree, prev_list_of_list_of_imgs in expressions[i - 1]:
+            for tf_name in sorted_unary:
+                prev_tf_name = get_key(img_tree)
+                # if previous transformation is lexicographically smaller, don't apply this, because they commute
+                # i.e. no need to append b(a(...)) because we've already appended a(b(...))
+                # check prev_tf_name >= tf_name for commuting or prev not in commuting (which == sorted_unary here)
+                # get_object does not commute with others but for simplicity we assume that too
+                if prev_tf_name >= tf_name or prev_tf_name not in sorted_unary:
+                    # check if previous transformation is not crop or get_object because tf^2(I) = tf(I)
+                    # this is true only for the same param but we suppose that we can't tf^2 anyways
+                    if tf_name in ['crop', 'get_object']:
+                        tf_tree = None
+                        if prev_tf_name != tf_name:
+                            list_of_list_of_imgs = []
+                            for ind, prev_list_of_imgs in enumerate(prev_list_of_list_of_imgs):
+                                list_of_imgs = set()  # should be set !
+                                for img in prev_list_of_imgs:
+                                    for param in Image.param_tfs()[tf_name]:
+                                        v = Image.unary_tfs()[tf_name](img, param)
+                                        if v and v not in list_of_sets_of_all_possible_images[ind]:
+                                            list_of_imgs.add(v)
+                                            list_of_sets_of_all_possible_images[ind].add(v)
+                                list_of_list_of_imgs.append(list_of_imgs)
+                            # check that is every element of list_of_list_of_imgs is not empty
+                            if all(list_of_list_of_imgs):
+                                tf_tree = Tree()
+                                tf_tree[tf_name] = img_tree
+                    # check if previous transformation is not mirror because mirror^2(I) = I
+                    elif tf_name == 'mirror':
+                        tf_tree = None
+                        if prev_tf_name != tf_name:
+                            list_of_list_of_imgs = []
+                            for ind, prev_list_of_imgs in enumerate(prev_list_of_list_of_imgs):
+                                list_of_imgs = set()  # should be set !
+                                for img in prev_list_of_imgs:
+                                    v = Image.unary_tfs()[tf_name](img)
+                                    if v and v not in list_of_sets_of_all_possible_images[ind]:
+                                        list_of_imgs.add(v)
+                                        list_of_sets_of_all_possible_images[ind].add(v)
+                                list_of_list_of_imgs.append(list_of_imgs)
+                            if all(list_of_list_of_imgs):
+                                tf_tree = Tree()
+                                tf_tree[tf_name] = img_tree
+                    else:
+                        tf_tree = None
+                        list_of_list_of_imgs = []
+                        for ind, prev_list_of_imgs in enumerate(prev_list_of_list_of_imgs):
+                            list_of_imgs = set()  # should be set !
+                            for img in prev_list_of_imgs:
+                                v = Image.unary_tfs()[tf_name](img)
+                                if v and v not in list_of_sets_of_all_possible_images[ind]:
+                                    list_of_imgs.add(v)
+                                    list_of_sets_of_all_possible_images[ind].add(v)
+                            list_of_list_of_imgs.append(list_of_imgs)
+                        # create tree
+                        if all(list_of_list_of_imgs):
+                            tf_tree = Tree()
+                            tf_tree[tf_name] = img_tree
+                    # append
+                    # unary_expressions[tf_name] += [tf_tree] if tf_tree else []
+                    if tf_tree:
+                        unary_expressions[tf_name].append((tf_tree, list_of_list_of_imgs))
+        # append
+        for u_expr in unary_expressions.values():
+            expressions[i] += u_expr
+
+    return expressions, list_of_sets_of_all_possible_images
+
+
+def solve_task(path, length, verbose=False):
+    data = get_data(path)
+    train_data = data['train']
+    expressions, list_of_sets_of_all_possible_images = \
+        recursionTreeEvalSet(length,[{Image(pair['input'])} for pair in train_data])
+
+    passed = True
+    for i, pair in enumerate(train_data):
+        if Image(pair['output']) not in list_of_sets_of_all_possible_images[i]:
+            passed = False
+            break
+    if passed and verbose:
+        print('Bingo!', path)
+
+    # solutions = []
+    # for i, (expression, lists) in expressions.items():
+    #     for imgTree in v:
+    #         passed = True
+    #         for pair in train_data:
+    #             inp, out = Image(pair['input']), Image(pair['output'])
+    #             if out not in compute(imgTree, inp):
+    #                 passed = False
+    #                 break
+    #         if passed:
+    #             if verbose:
+    #                 print('Bingo!')
+    #                 pp.pprint(dicts(imgTree))
+    #             solutions.append(imgTree)
+    # return solutions
+
 
 def get_key(t):
     """
@@ -399,17 +687,32 @@ def solve_all_tasks(length, training):
 
 
 if __name__ == '__main__':
-    n = 3
-    # expressions = recursionTree(n)
-    # for i in range(1, n + 1):
-    #     print(i)
-    #     pp.pprint(list(map(dicts, expressions[i])))
-    dataset = 'evaluation'
-    print(n, dataset)
-    all_solutions = solve_all_tasks(n, dataset)
-    print('Solved', len(all_solutions))
-    print()
-    for key, value in all_solutions.items():
-        print(key)
-        pp.pprint(dicts(value[0]))
-        print()
+    tasks = sorted(os.listdir('data/training'))
+    for task in tasks:
+        solve_task('data/training/' + task, 4, verbose=True)
+
+    # n = 4
+    # inp1 = Image([[1, 1, 1],
+    #             [0, 0, 0],
+    #             [0, 0, 0]])
+    # inp2 = Image([[1, 2, 1],
+    #            [0, 1, 3],
+    #            [1, 0, 1]])
+    # expr = recursionTreeEvalSet(n, [{inp1},{inp2}])
+    # # expressions = recursionTree(n)
+    # for j in range(1, n + 1):
+    #     print(j)
+    #     for t, imgs1 in expr[j]:
+    #         pp.pprint(dicts(t))
+    #         print(imgs1)
+        # pp.pprint(list(map(dicts, expressions[i])))
+
+    # dataset = 'evaluation'
+    # print(n, dataset)
+    # all_solutions = solve_all_tasks(n, dataset)
+    # print('Solved', len(all_solutions))
+    # print()
+    # for key, value in all_solutions.items():
+    #     print(key)
+    #     pp.pprint(dicts(value[0]))
+    #     print()
