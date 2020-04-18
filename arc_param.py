@@ -1,3 +1,6 @@
+from types import FunctionType
+# from inspect import signature
+
 import numpy as np
 import itertools
 from collections import defaultdict
@@ -8,13 +11,51 @@ import os
 # from utils import withrepr
 
 import pprint
+
 pp = pprint.PrettyPrinter(indent=0)
+
 
 def tree(): return defaultdict(tree)
 
-def dicts(t): return {k: dicts(t[k]) for k in t}
+
+def dicts(t):
+    k = get_key(t)
+    if k == 'image':
+        return {k}
+    else:
+        return {k: dicts(t[k])}
+
+
+COLORS = range(10)
+OBJECT_INDICES = range(10)
+
 
 class Image:
+    """
+    If a transformation can not be applied to given parameters, it should return None.
+    Transformations have arguments (another images) and parameters (i.e., color).
+    """
+
+    @classmethod
+    def transforms(cls):
+        return ({name: f for name, f in cls.__dict__.items()
+                 if type(f) == FunctionType and not name.startswith('__')})
+
+    @classmethod
+    def param_tfs(cls):
+        return {'crop': COLORS, 'get_object': OBJECT_INDICES}
+
+    @classmethod
+    def unary_tfs(cls):
+        return {'rotate_90': Image.rotate_90, 'mirror': Image.mirror, 'crop': Image.crop, 'get_object': Image.get_object}
+        # return ({name : tf for name, tf in cls.transforms().items()
+        #             if len(signature(tf).parameters)==1})
+
+    @classmethod
+    def binary_tfs(cls):
+        return {'concat_right': Image.concat_right}#, 'concat_down': Image.concat_down, 'logical_and': Image.logical_and}
+        # return ({name: tf for name, tf in cls.transforms().items()
+        #          if len(signature(tf).parameters)==2})
 
     def __init__(self, matrix):
         self.matrix = np.matrix(matrix)
@@ -24,45 +65,52 @@ class Image:
     def rotate_90(self):
         """
         Rotate clockwise by 90 degrees.
+        This transformation has propriety rotate_90^4(I)=I.
+        This transformation commutes with mirror, crop.
         """
         return Image(np.rot90(self.matrix, axes=(1, 0)))
 
     def mirror(self):
         """
         Mirror flip from left to right
-        [[ 1.,  2.,  3.],         [ 3.,  2.,  1.]
-        [ 0.,  2.,  0.],   --->   [ 0.,  2.,  0.]
-        [ 0.,  0.,  3.]]          [ 3.,  0.,  0.]
+        [[1,  2,  3],         [[3,  2,  1]
+        [0,  2,  0],   --->   [0,  2,  0]
+        [0,  0,  3]]          [3,  0,  0]]
+        This transformation has propriety mirror(mirror(I)) = I.
+        This transformation commutes with rotate_90, crop.
         """
         return Image(np.fliplr(self.matrix))
 
     # @withrepr(lambda x: x.__name__)
     def concat_right(self, image):
         """
+        image - argument
         A,B -> AB
         """
+        if self.height != image.height:
+            return None
         return Image(np.concatenate((self.matrix, image.matrix), axis=1))
-
-    def concat_right_compat(self, image):
-        return self.height == image.height
 
     # @withrepr(lambda x: x.__name__)
     def concat_down(self, image):
         """
+        image - argument
         A,B -> A
                B
         """
+        if self.width != image.width:
+            return None
         return Image(np.concatenate((self.matrix, image.matrix)))
-
-    def concat_down_compat(self, image):
-        return self.width == image.width
 
     def crop(self, color):
         """
+        color - parameter
         crops the minimal bound rectangle for a given color
-        [[ 1.,  2.,  3.],          [ 3.]
-        [ 0.,  2.,  0.],  3 --->   [ 0.]
-        [ 0.,  0.,  3.]]           [ 3.]
+        [[1,  2,  3],          [[3]
+        [0,  2,  0],  3 --->   [0]
+        [0,  0,  3]]           [3]]
+        This transformation has propriety crop(crop(I, color)) = crop(I, color).
+        This transformation commutes with mirror, rotate_90.
         """
         left = 100
         right = -1
@@ -70,16 +118,92 @@ class Image:
         down = -1
         for i in range(self.height):
             for j in range(self.width):
-                if self.matrix[i,j] == color:
+                if self.matrix[i, j] == color:
                     if j < left: left = j
                     if j > right: right = j
                     if i < up: up = i
                     if i > down: down = i
-        return Image(self.matrix[up:down+1,left:right+1])
+        crop_matrix = self.matrix[up:down + 1, left:right + 1]
+        if crop_matrix.size == 0:
+            return None
+        return Image(crop_matrix)
+
+    def logical_and(self, image):
+        """
+        A & B
+        color + color = color
+        color + another_color = black
+        """
+        w, h = self.width, self.height
+        i_w, i_h = image.width, image.height
+
+        if w > i_w or h > i_h:  # try to adjust the image size
+            ratio_w = w / float(i_w)
+            ratio_h = h / float(i_h)
+            if ratio_w.is_integer() and ratio_h.is_integer():
+                image.matrix = np.tile(image.matrix, (int(ratio_h), int(ratio_w)))
+            else:
+                return None
+        elif w != i_w or h != i_h:
+            return None
+
+        return Image(self.matrix & image.matrix)
+
+    def recolor(self, color1, color2):
+        """
+        changes color1 in the image to color2
+        """
+        return Image(np.where(self.matrix == color1, color2, self.matrix))
+
+    def get_object(self, index):
+        """
+        Returns an element of the list of minimal rectangles for all objects in the image with index.
+        Object is a connected component of more than one cell with pixels of the same color except black.
+        Looks at vertical, horizontal and diagonal connections.
+        This transformation has property ∀ index1 ∃ index2:
+        get_object(get_object(I, index1), index2) = get_object(I, index1).
+        """
+        matrix = self.matrix
+        assert len(matrix.shape) == 2
+        h, w = matrix.shape
+        dyy = [0, -1, -1, -1, 0, 1, 1, 1]
+        dxx = [1, 1, 0, -1, -1, -1, 0, 1]
+        visited = np.zeros(matrix.shape, dtype=bool)
+        shapes = []
+        based_geometry = {'l': w, 'r': 0, 'b': h, 't': 0}
+        for i in range(h):
+            for j in range(w):
+                color = matrix[i,j]
+                if color == 0:
+                    continue
+                stack = [(i, j)]
+                geometry = dict(based_geometry)
+                while stack:
+                    y, x = stack.pop(0)
+                    if not (0 <= y < h and 0 <= x < w and matrix[y,x] == color):
+                        continue
+                    if not visited[y][x]:
+                        geometry['l'] = min(geometry['l'], x)
+                        geometry['r'] = max(geometry['r'], x)
+                        geometry['b'] = min(geometry['b'], y)
+                        geometry['t'] = max(geometry['t'], y)
+                        visited[y][x] = True
+                        for dy, dx in zip(dyy, dxx):
+                            y_, x_ = y + dy, x + dx
+                            stack.append((y_, x_))
+                shared_items = {k: geometry[k] for k in geometry if
+                                k in based_geometry and geometry[k] == based_geometry[k]}
+                if len(shared_items) < 4:
+                    crop_matrix = matrix[geometry['b']:geometry['t'] + 1, geometry['l']:geometry['r'] + 1]
+                    if crop_matrix.size > 1 and crop_matrix.size != matrix.size:
+                        shapes.append(Image(crop_matrix))
+        if index in range(len(shapes)):
+            return shapes[index]
+        return None
 
     def __eq__(self, other):
         if isinstance(other, Image):
-            return np.array_equal(self.matrix,other.matrix)
+            return np.array_equal(self.matrix, other.matrix)
         return False
 
     def __str__(self):
@@ -88,156 +212,147 @@ class Image:
     def __repr__(self):
         return str(self.matrix)
 
-# methods_list = [func for func in dir(Image) if callable(getattr(Image, func)) and not func.startswith("__")]
-# print(methods_list)
-# for method in methods_list:
-# 	exec(f"{method} = Image.{method}")
-
-rotate_90 = Image.rotate_90
-mirror = Image.mirror
-concat_right = Image.concat_right
-concat_right_compat = Image.concat_right_compat
-concat_down = Image.concat_down
-concat_down_compat = Image.concat_down_compat
-crop = Image.crop
 
 def partitionfunc(n, k, l=1):
     """n is the integer to partition, k is the length of partitions, l is the min partition element size"""
     if k < 1:
-        raise StopIteration
+        return
     if k == 1:
         if n >= l:
             yield (n,)
-        raise StopIteration
+        return
     for i in range(l, n + 1):
         for result in partitionfunc(n - i, k - 1, i):
             yield (i,) + result
 
 
-def permutatations(partitions):
+def permutations(partitions):
     return [*itertools.chain.from_iterable(set(itertools.permutations(p)) for p in partitions)]
-
-
-def recursion(depth, image):
-    expressions = {1: [image]}
-    for i in range(2, depth + 1):
-        # single argument
-        rotate_90_expressions = [rotate_90(img) for img in expressions[i - 1]]
-        # two arguments
-        partitions = list(partitionfunc(i - 1, 2))
-        perms = permutatations(partitions)
-        concat_right_expressions = []
-        concat_down_expressions = []
-        for a, b in perms:
-            concat_right_expressions += [concat_right(img1, img2) for img1 in expressions[a]
-                                             for img2 in expressions[b]
-                                             if concat_right_compat(img1, img2)]
-            concat_down_expressions += [concat_down(img1, img2) for img1 in expressions[a]
-                                            for img2 in expressions[b]
-                                            if concat_down_compat(img1, img2)]
-        # append
-        expressions[i] = (rotate_90_expressions + concat_right_expressions + concat_down_expressions)
-    return expressions
 
 
 def create_random_string(k=10):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=k))
 
 
-def recursionTree(depth):
+sorted_unary = sorted(Image.unary_tfs())
+
+
+def recursionTree(length):
     input_tree = tree()
     input_tree['image']
-    expressions = {1: [input_tree]}
-    for i in range(2, depth + 1):
+    expressions = defaultdict(list)
+    expressions[1] = [input_tree]
+    for i in range(2, length + 1):
         # single argument
-        rotate_90_expressions = []
-        mirror_expressions = []
-        crop_expressions = []
+        unary_expressions = defaultdict(list)
         for img_tree in expressions[i - 1]:
-            # create tree
-            rotate_90_tree = tree()
-            rotate_90_tree['rotate_90'] = img_tree
-            mirror_tree = tree()
-            mirror_tree['mirror'] = img_tree
-            crop_tree = tree()
-            crop_tree['crop'] = img_tree
-            # append
-            rotate_90_expressions.append(rotate_90_tree)
-            mirror_expressions.append(mirror_tree)
-            crop_expressions.append(crop_tree)
+            for tf_name in sorted_unary:
+                prev_tf_name = get_key(img_tree)
+                # if previous transformation is lexicographically smaller, don't apply this, because they commute
+                # i.e. no need to append b(a(...)) because we've already appended a(b(...))
+                # check prev_tf_name >= tf_name for commuting or prev not in commuting (which == sorted_unary here)
+                # get_object does not commute with others but for simplicity we assume that too
+                if prev_tf_name >= tf_name or prev_tf_name not in sorted_unary:
+                    # check if previous transformation is not crop because crop^2(I) = crop(I)
+                    # this is true only for the same color but we suppose that we can't crop^2 anyways
+                    if tf_name == 'crop':
+                        tf_tree = None
+                        if prev_tf_name != 'crop':
+                            tf_tree = tree()
+                            tf_tree[tf_name] = img_tree
+                    # check if previous transformation is not mirror because mirror^2(I) = I
+                    elif tf_name == 'mirror':
+                        tf_tree = None
+                        if prev_tf_name != 'mirror':
+                            tf_tree = tree()
+                            tf_tree[tf_name] = img_tree
+                    elif tf_name == 'get_object':
+                        tf_tree = None
+                        if prev_tf_name != 'get_object':
+                            tf_tree = tree()
+                            tf_tree[tf_name] = img_tree
+                    else:
+                        # create tree
+                        tf_tree = tree()
+                        tf_tree[tf_name] = img_tree
+                    # append
+                    # unary_expressions[tf_name] += [tf_tree] if tf_tree else []
+                    if tf_tree:
+                        unary_expressions[tf_name].append(tf_tree)
         # two arguments
         partitions = list(partitionfunc(i - 1, 2))
-        perms = permutatations(partitions)
-        concat_right_expressions = []
-        concat_down_expressions = []
+        perms = permutations(partitions)
+        binary_expressions = defaultdict(list)
         for a, b in perms:
             for img1_tree in expressions[a]:
                 for img2_tree in expressions[b]:
-                    # if concat_right_compat(img1, img2):
-                    if True:
-                        # create tree
-                        concat_right_tree = tree()
-                        concat_right_tree['concat_right']['l'] = img1_tree
-                        concat_right_tree['concat_right']['r'] = img2_tree
+                    for tf_name in Image.binary_tfs().keys():
+                        # don't add concat(mirror,mirror) because mirror(concat(,))
+                        if tf_name in ['concat_right', 'concat_down']:
+                            tf_tree = None
+                            if not (get_key(img1_tree) == 'mirror' and
+                                    get_key(img2_tree) == 'mirror'):
+                                tf_tree = tree()
+                                tf_tree[tf_name]['l'] = img1_tree
+                                tf_tree[tf_name]['r'] = img2_tree
+                        else:
+                            # create tree
+                            tf_tree = tree()
+                            tf_tree[tf_name]['l'] = img1_tree
+                            tf_tree[tf_name]['r'] = img2_tree
                         # append
-                        concat_right_expressions.append(concat_right_tree)
-                    # if concat_down_compat(img1, img2):
-                    if True:
-                        # create tree
-                        concat_down_tree = tree()
-                        concat_down_tree['concat_down']['l'] = img1_tree
-                        concat_down_tree['concat_down']['r'] = img2_tree
-                        # append
-                        concat_down_expressions.append(concat_down_tree)
+                        if tf_tree:
+                            binary_expressions[tf_name].append(tf_tree)
         # append
-        expressions[i] = rotate_90_expressions + mirror_expressions + crop_expressions \
-                         + concat_right_expressions + concat_down_expressions
+        for u_expr in unary_expressions.values(): expressions[i] += u_expr
+        for b_expr in binary_expressions.values(): expressions[i] += b_expr
+
     return expressions
 
 
-def compute(exprTree, inpImage):
-    if not exprTree:
+def get_key(t):
+    """
+    t - tree
+    """
+    return next(iter(t.keys()))
+
+
+def compute(expr_tree, inp_image):
+    if not expr_tree:
         return []
-    key = next(iter(exprTree.keys()))
+    key = get_key(expr_tree)
     if key == 'image':
-        return [inpImage]
-    elif key == 'rotate_90':
+        return [inp_image]
+    elif key in Image.unary_tfs():
+        imgs = compute(next(iter(expr_tree.values())), inp_image)
         computes = []
-        for img in compute(next(iter(exprTree.values())), inpImage):
-            if img:
-                computes.append(rotate_90(img))
-        return computes
-    elif key == 'mirror':
-        computes = []
-        for img in compute(next(iter(exprTree.values())), inpImage):
-            if img:
-                computes.append(mirror(img))
-        return computes
-    elif key == 'crop':
-        colors = range(10)
-        computes = []
-        for color in colors:
-            for img in compute(next(iter(exprTree.values())), inpImage):
+        if key in Image.param_tfs():
+            for param in Image.param_tfs()[key]:
+                for img in imgs:
+                    if img:
+                        v = Image.unary_tfs()[key](img, param)
+                        if v:
+                            computes.append(v)
+        else:
+            for img in imgs:
                 if img:
-                    v = crop(img, color)
-                    # put check in another function in Image class
-                    if v.matrix.size != 0:
+                    v = Image.unary_tfs()[key](img)
+                    if v:
                         computes.append(v)
         return computes
-    elif key == 'concat_right':
+    elif key in Image.binary_tfs():
+        l_list = compute(expr_tree[key]['l'], inp_image)
+        r_list = compute(expr_tree[key]['r'], inp_image)
         computes = []
-        for l in compute(exprTree['concat_right']['l'], inpImage):
-            for r in compute(exprTree['concat_right']['r'], inpImage):
-                if l and r and concat_right_compat(l, r):
-                    computes.append(concat_right(l, r))
+        # if not l_list or not r_list: return computes
+        for l in l_list:
+            for r in r_list:
+                if l and r:
+                    v = Image.binary_tfs()[key](l, r)
+                    if v:
+                        computes.append(v)
         return computes
-    elif key == 'concat_down':
-        computes = []
-        for l in compute(exprTree['concat_down']['l'], inpImage):
-            for r in compute(exprTree['concat_down']['r'], inpImage):
-                if l and r and concat_down_compat(l, r):
-                    computes.append(concat_down(l, r))
-        return computes
+
 
 data_path = Path('data/')
 training_path = data_path / 'training'
@@ -251,10 +366,9 @@ def get_data(task_filename):
     return task
 
 
-def find_tree(path, depth, verbose=False):
+def find_tree(path, expressions, verbose=False):
     data = get_data(path)
     train_data = data['train']
-    expressions = recursionTree(depth)
     solutions = []
     for i, v in expressions.items():
         for imgTree in v:
@@ -272,20 +386,30 @@ def find_tree(path, depth, verbose=False):
     return solutions
 
 
-def solve_all_tasks(depth, training):
+def solve_all_tasks(length, training):
+    expressions = recursionTree(length)
     all_solutions = {}
     path = data_path / training
     tasks = sorted(os.listdir(path))
     for task in tasks:
-        task_solutions = find_tree(path / task, depth)
+        task_solutions = find_tree(path / task, expressions)
         if task_solutions:
             all_solutions[task] = task_solutions
     return all_solutions
 
 
-
-all_solutions = solve_all_tasks(3, 'e')
-for key, value in all_solutions.items():
-    print(key)
-    print(value[0])
+if __name__ == '__main__':
+    n = 3
+    # expressions = recursionTree(n)
+    # for i in range(1, n + 1):
+    #     print(i)
+    #     pp.pprint(list(map(dicts, expressions[i])))
+    dataset = 'evaluation'
+    print(n, dataset)
+    all_solutions = solve_all_tasks(n, dataset)
+    print('Solved', len(all_solutions))
     print()
+    for key, value in all_solutions.items():
+        print(key)
+        pp.pprint(dicts(value[0]))
+        print()
