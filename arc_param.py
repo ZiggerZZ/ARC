@@ -8,6 +8,7 @@ import random, string
 import json
 from pathlib import Path
 import os
+import tqdm
 # from utils import withrepr
 
 import pprint
@@ -22,8 +23,7 @@ def dicts(t):
     k = get_key(t)
     if k == 'image':
         return {k}
-    else:
-        return {k: dicts(t[k])}
+    return {kk: dicts(t[kk]) for kk in t}
 
 
 COLORS = range(10)
@@ -62,7 +62,7 @@ class Image:
 
     @classmethod
     def binary_tfs(cls):
-        return {'concat_right': Image.concat_right}#, 'concat_down': Image.concat_down, 'logical_and': Image.logical_and}
+        return {'concat_right': Image.concat_right, 'concat_down': Image.concat_down}#, 'logical_and': Image.logical_and}
         # return ({name: tf for name, tf in cls.transforms().items()
         #          if len(signature(tf).parameters)==2})
 
@@ -560,9 +560,60 @@ def recursionTreeEvalSet(length, images):
                     # unary_expressions[tf_name] += [tf_tree] if tf_tree else []
                     if tf_tree:
                         unary_expressions[tf_name].append((tf_tree, list_of_list_of_imgs))
+        # two arguments
+        partitions = list(partitionfunc(i - 1, 2))
+        perms = permutations(partitions)
+        binary_expressions = defaultdict(list)
+        for a, b in perms:
+            for img1_tree, prev_list_of_list_of_imgs1 in expressions[a]:
+                for img2_tree, prev_list_of_list_of_imgs2 in expressions[b]:
+                    for tf_name in Image.binary_tfs().keys():
+                        # don't add concat(mirror,mirror) because mirror(concat(,))
+                        if tf_name in ['concat_right', 'concat_down']:
+                            tf_tree = None
+                            if not (get_key(img1_tree) == 'mirror' and
+                                    get_key(img2_tree) == 'mirror'):
+                                list_of_list_of_imgs = []
+                                for ind, (prev_list_of_imgs1, prev_list_of_imgs2) in enumerate(zip(prev_list_of_list_of_imgs1, prev_list_of_list_of_imgs2)):
+                                    list_of_imgs = set()
+                                    for img1 in prev_list_of_imgs1:
+                                        for img2 in prev_list_of_imgs2:
+                                            v = Image.binary_tfs()[tf_name](img1, img2)
+                                            if v and v not in list_of_sets_of_all_possible_images[ind]:
+                                                list_of_imgs.add(v)
+                                                list_of_sets_of_all_possible_images[ind].add(v)
+                                    list_of_list_of_imgs.append(list_of_imgs)
+                                # create tree
+                                if all(list_of_list_of_imgs):
+                                    tf_tree = Tree()
+                                    tf_tree[tf_name]['l'] = img1_tree
+                                    tf_tree[tf_name]['r'] = img2_tree
+                        else:
+                            tf_tree = None
+                            list_of_list_of_imgs = []
+                            for ind, (prev_list_of_imgs1, prev_list_of_imgs2) in enumerate(
+                                    zip(prev_list_of_list_of_imgs1, prev_list_of_list_of_imgs2)):
+                                list_of_imgs = set()
+                                for img1 in prev_list_of_imgs1:
+                                    for img2 in prev_list_of_imgs2:
+                                        v = Image.binary_tfs()[tf_name](img1, img2)
+                                        if v and v not in list_of_sets_of_all_possible_images[ind]:
+                                            list_of_imgs.add(v)
+                                            list_of_sets_of_all_possible_images[ind].add(v)
+                                list_of_list_of_imgs.append(list_of_imgs)
+                            # create tree
+                            if all(list_of_list_of_imgs):
+                                tf_tree = Tree()
+                                tf_tree[tf_name]['l'] = img1_tree
+                                tf_tree[tf_name]['r'] = img2_tree
+                        # append
+                        if tf_tree:
+                            binary_expressions[tf_name].append((tf_tree, list_of_list_of_imgs))
         # append
         for u_expr in unary_expressions.values():
             expressions[i] += u_expr
+        for b_expr in binary_expressions.values():
+            expressions[i] += b_expr
 
     return expressions, list_of_sets_of_all_possible_images
 
@@ -590,12 +641,9 @@ def solve_task(path, length, verbose=False):
                 if Image(pair['output']) not in list_of_sets[i]:
                     passed = False
                     break
-            if passed and verbose:
-                print('Bingo! Length', length_of_expression, path)
-                pp.pprint(dicts(expression))
             if passed:
                 if verbose:
-                    print('Bingo!')
+                    print('\nBingo! Length', length_of_expression, path)
                     pp.pprint(dicts(expression))
                 solutions.append(expression)
     return solutions
@@ -690,18 +738,21 @@ def solve_all_tasks(length, training):
 
 
 if __name__ == '__main__':
-    tasks = sorted(os.listdir('data/training'))
-    for task in tasks:
-        solve_task('data/training/' + task, 4, verbose=True)
+    n = 5
+    dataset = 'evaluation'
+    print('Length', n, dataset)
+    tasks = sorted(os.listdir('data/'+dataset))
+    for task in tqdm.tqdm(tasks):
+        solve_task('data/'+ dataset + '/' + task, n, verbose=True)
 
-    # n = 4
+    # n = 5
     # inp1 = Image([[1, 1, 1],
     #             [0, 0, 0],
     #             [0, 0, 0]])
     # inp2 = Image([[1, 2, 1],
     #            [0, 1, 3],
     #            [1, 0, 1]])
-    # expr = recursionTreeEvalSet(n, [{inp1},{inp2}])
+    # expr, _ = recursionTreeEvalSet(n, [{inp1}, {inp2}])
     # # expressions = recursionTree(n)
     # for j in range(1, n + 1):
     #     print(j)
